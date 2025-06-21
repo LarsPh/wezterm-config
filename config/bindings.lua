@@ -2,7 +2,8 @@ local wezterm = require('wezterm')
 local platform = require('utils.platform')
 local backdrops = require('utils.backdrops')
 local act = wezterm.action
-local resurrect = require('config.resurrect')
+-- local resurrect = require('config.resurrect')
+local sessions = wezterm.plugin.require("https://github.com/abidibo/wezterm-sessions")
 local workspace_switcher = require('config.workspace_switcher')
 local mod = {}
 
@@ -32,21 +33,11 @@ local keys = {
    {
       key = 'u',
       mods = mod.SUPER_REV,
-      action = wezterm.action.QuickSelectArgs({
-         label = 'open url',
-         patterns = {
-            '\\((https?://\\S+)\\)',
-            '\\[(https?://\\S+)\\]',
-            '\\{(https?://\\S+)\\}',
-            '<(https?://\\S+)>',
-            '\\bhttps?://\\S+[)/a-zA-Z0-9-]+'
-         },
-         action = wezterm.action_callback(function(window, pane)
-            local url = window:get_selection_text_for_pane(pane)
-            wezterm.log_info('opening: ' .. url)
-            wezterm.open_with(url)
-         end),
-      }),
+      action = wezterm.action_callback(function(window, pane)
+         local url = window:get_selection_text_for_pane(pane)
+         wezterm.log_info('opening: ' .. url)
+         wezterm.open_with(url)
+      end),
    },
 
    -- cursor movement --
@@ -213,55 +204,180 @@ local keys = {
    },
    -- workspace switcher
    {
-      key = 's',
-      mods = mod.SUPER,
+      key = 'w',
+      mods = mod.SUPER_REV,
       action = workspace_switcher.switch_workspace(),
    },
    {
-      key = 'S',
-      mods = mod.SUPER,
+      key = 'W',
+      mods = mod.SUPER_REV,
       action = workspace_switcher.switch_to_prev_workspace(),
+   },
+   -- rename/create workspace
+   {
+      key = 'F6',
+      mods = 'NONE',
+      action = act.PromptInputLine {
+         description = 'Enter new workspace name',
+         action = wezterm.action_callback(
+               function(window, pane, line)
+                  if line then
+                     wezterm.mux.rename_workspace(wezterm.mux.get_active_workspace(), line)
+                  end
+               end
+         ),
+      },
+   },
+   {
+      key = 'N',
+      mods = mod.SUPER,
+      action = act.PromptInputLine {
+         description = wezterm.format {
+            { Attribute = { Intensity = 'Bold' } },
+            { Foreground = { AnsiColor = 'Fuchsia' } },
+            { Text = 'Enter name for new workspace' },
+         },
+         action = wezterm.action_callback(function(window, pane, line)
+            -- line will be `nil` if they hit escape without entering anything
+            -- An empty string if they just hit enter
+            -- Or the actual line of text they wrote
+            if line then
+                  window:perform_action(
+                     act.SwitchToWorkspace {
+                        name = line,
+                     },
+                     pane
+                  )
+            end
+         end),
+      },
    },
    -- resurrect
    -- {
    --    key = 's',
-   --    mods = mod.SUPER,
+   --    mods = mod.SUPER_REV,
    --    action = wezterm.action_callback(function(win, pane)
    --       resurrect.state_manager.save_state(resurrect.workspace_state.get_workspace_state())
    --       resurrect.window_state.save_window_action()
    --    end),
    -- },
    -- {
-   --    key = 'F6',
-   --    mods = 'NONE',
+   --    key = 'S',
+   --    mods = mod.SUPER_REV,
    --    action = resurrect.tab_state.save_tab_action(),
    -- },
    -- {
    --    key = 'l',
    --    mods = mod.SUPER,
    --    action = wezterm.action_callback(function(win, pane)
+   --       wezterm.log_info('Super+L pressed: Initiating fuzzy_load')
    --       resurrect.fuzzy_loader.fuzzy_load(win, pane, function(id, label)
-   --       local type = string.match(id, "^([^/]+)") -- match before '/'
-   --       id = string.match(id, "([^/]+)$") -- match after '/'
-   --       id = string.match(id, "(.+)%..+$") -- remove file extention
-   --       local opts = {
-   --          relative = true,
-   --          restore_text = true,
-   --          on_pane_restore = resurrect.tab_state.default_on_pane_restore,
-   --       }
-   --       if type == "workspace" then
-   --          local state = resurrect.state_manager.load_state(id, "workspace")
-   --          resurrect.workspace_state.restore_workspace(state, opts)
-   --       elseif type == "window" then
-   --          local state = resurrect.state_manager.load_state(id, "window")
-   --          resurrect.window_state.restore_window(pane:window(), state, opts)
-   --       elseif type == "tab" then
-   --          local state = resurrect.state_manager.load_state(id, "tab")
-   --          resurrect.tab_state.restore_tab(pane:tab(), state, opts)
-   --       end
+   --          if not id then
+   --             wezterm.log_warn('Fuzzy loader cancelled or no selection.')
+   --             return
+   --          end
+   --          wezterm.log_info('Fuzzy loader selected: id=' .. tostring(id) .. ', label=' .. tostring(label))
+
+   --          local type_from_plugin
+   --          local file_name_from_plugin
+   --          local separator_pos = string.find(id, "[/\\]") -- Find first / or \
+
+   --          if separator_pos then
+   --             type_from_plugin = string.sub(id, 1, separator_pos - 1)
+   --             file_name_from_plugin = string.sub(id, separator_pos + 1)
+   --          else
+   --             wezterm.log_error('Could not parse type/file from fuzzy loader ID: ' .. tostring(id))
+   --             -- Attempt a fallback if no separator, assuming id might just be filename for a default type
+   --             -- or that the plugin might change its id format. This part is speculative.
+   --             -- For now, we'll error out if parsing fails.
+   --             return
+   --          end
+
+   --          -- id_to_load should be the filename without the .json extension
+   --          local id_to_load = string.match(file_name_from_plugin, "(.+)%..+$")
+   --          if not id_to_load then
+   --             id_to_load = file_name_from_plugin -- Fallback if no extension (e.g. if format changes)
+   --          end
+
+   --          wezterm.log_info('Parsed: type_from_plugin=' .. tostring(type_from_plugin) .. ', file_name_from_plugin=' .. tostring(file_name_from_plugin) .. ', id_to_load=' .. tostring(id_to_load))
+
+   --          local opts = {
+   --             relative = true,
+   --             restore_text = true,
+   --             on_pane_restore = resurrect.tab_state.default_on_pane_restore,
+   --          }
+   --          -- Create a loggable version of opts
+   --          local loggable_opts = {}
+   --          for k, v in pairs(opts) do
+   --             if type(v) == "function" then
+   --                loggable_opts[k] = "<function>"
+   --             else
+   --                loggable_opts[k] = v
+   --             end
+   --          end
+   --          wezterm.log_info('Using opts: ' .. wezterm.json_encode(loggable_opts))
+
+   --          if type_from_plugin == "workspace" then
+   --             wezterm.log_info('Attempting to load and restore workspace: ' .. tostring(id_to_load))
+   --             local state = resurrect.state_manager.load_state(id_to_load, "workspace")
+   --             wezterm.log_info('Loaded workspace state: ' .. (state and wezterm.json_encode(state) or "nil"))
+   --             if state then
+   --                resurrect.workspace_state.restore_workspace(state, opts)
+   --                wezterm.log_info('Called restore_workspace for: ' .. tostring(id_to_load))
+   --             else
+   --                wezterm.log_warn('Failed to load workspace state for: ' .. tostring(id_to_load))
+   --             end
+   --          elseif type_from_plugin == "window" then
+   --             wezterm.log_info('Attempting to load and restore window: ' .. tostring(id_to_load))
+   --             local state = resurrect.state_manager.load_state(id_to_load, "window")
+   --             wezterm.log_info('Loaded window state: ' .. (state and wezterm.json_encode(state) or "nil"))
+   --             if state then
+   --                resurrect.window_state.restore_window(pane:window(), state, opts)
+   --                wezterm.log_info('Called restore_window for: ' .. tostring(id_to_load))
+   --             else
+   --                wezterm.log_warn('Failed to load window state for: ' .. tostring(id_to_load))
+   --             end
+   --          elseif type_from_plugin == "tab" then
+   --             wezterm.log_info('Attempting to load and restore tab: ' .. tostring(id_to_load))
+   --             local state = resurrect.state_manager.load_state(id_to_load, "tab")
+   --             wezterm.log_info('Loaded tab state: ' .. (state and wezterm.json_encode(state) or "nil"))
+   --             if state then
+   --                resurrect.tab_state.restore_tab(pane:tab(), state, opts)
+   --                wezterm.log_info('Called restore_tab for: ' .. tostring(id_to_load))
+   --             else
+   --                wezterm.log_warn('Failed to load tab state for: ' .. tostring(id_to_load))
+   --             end
+   --          else
+   --             wezterm.log_warn('Unknown type_from_plugin for restoration: ' .. tostring(type_from_plugin) .. ' from original id: ' .. tostring(id))
+   --          end
    --       end)
    --    end),
    -- },
+   {
+      key = 's',
+      mods = mod.SUPER,
+      action = act({ EmitEvent = "save_session" }),
+   },
+   {
+      key = 'l',
+      mods = mod.SUPER,
+      action = act({ EmitEvent = "load_session" }),
+   },
+   {
+      key = 'r',
+      mods = mod.SUPER_REV,
+      action = act({ EmitEvent = "restore_session" }),
+   },
+   {
+      key = 'D',
+      mods = mod.SUPER,
+      action = act({ EmitEvent = "delete_session" }),
+   },
+   {
+      key = 'e',
+      mods = mod.SUPER,
+      action = act({ EmitEvent = "edit_session" }),
+   },
 }
 
 -- stylua: ignore
